@@ -19,6 +19,15 @@ INPUT = [
 ]
 GRID_SIZE = 5
 
+# level 1 from Bonus Pack
+INPUT = [
+    ( ( (1,3), (4,1) ), "yellow"),
+    ( ( (0,3), (4,3) ), "green"),
+    ( ( (1,1), (3,1) ), "blue"),
+    ( ( (3,3), (4,4) ), "red"),
+]
+GRID_SIZE = 5
+
 
 class FlowSolver:
     def __init__(self, size):
@@ -44,6 +53,11 @@ class FlowSolver:
 
     def on_effective_boundary(self, point):
         # either on the boundary itself
+        # or one of its neighbors is solved
+        if self.on_boundary(point): return True
+        if any(self.grid[p] in self.solved_names for p in self.neighbors(point)): return True
+        if any(self.grid[p] in self.solved_names for p in self.diagonals(point)): return True
+
         # OR all points leading to boundary are painted
         for direction in (1,0), (-1,0), (0,1), (0,-1):
             p = point
@@ -60,6 +74,16 @@ class FlowSolver:
         x,y = point
         return 0 <= x < self.size and 0 <= y < self.size
 
+    def diagonals(self, point):
+        x,y = point
+        potentials = [
+            (x-1,y-1),
+            (x-1,y+1),
+            (x+1,y-1),
+            (x+1,y+1),
+        ]
+        return [p for p in potentials if self.in_grid(p)]
+
     def neighbors(self, point):
         x,y = point
         potentials = [
@@ -73,19 +97,22 @@ class FlowSolver:
     def free_neighbors(self, point):
         return [p for p in self.neighbors(point) if not self.grid[p]]
 
-    def get_path(self, start, end, prepath=None):
+    def get_path(self, start, end, name, prepath=None):
         if prepath is None:
             prepath = []
 
         if start == end:
             return [start]
         # look for boundary path connecting these points
-        for point in self.free_neighbors(start):
+        for point in self.neighbors(start):
+            if self.grid[point] and self.grid[point] != name:
+                # already painted by another color
+                continue
             if point in prepath:
                 continue
             if not self.on_effective_boundary(point):
                 continue
-            subpath = self.get_path(point, end, prepath=prepath+[start])
+            subpath = self.get_path(point, end, name, prepath=prepath+[start])
             if subpath is not None:
                 return [start] + subpath
 
@@ -115,19 +142,18 @@ class FlowSolver:
                 if name in self.solved_names:
                     continue
                 if self.on_effective_boundary(p1) and self.on_effective_boundary(p2):
+                    print()
                     print( f"{name} = {p1,p2} on boundary" )
                     print( f"Finding path for {name}" )
 
-                    # temporarily unmark endpoints so the path algorithm works
-                    self.grid[p1] = self.grid[p2] = 0
-                    path = self.get_path(p1, p2)
+                    #pdb.set_trace()
+                    path = self.get_path(p1, p2, name)
                     if path:
                         path = self.remove_loops(path)
                         print( f"Path is: {path}" )
                         found_path = True
                         self.paint(path, name)
                         self.solved_names.append(name)
-                    self.grid[p1] = self.grid[p2] = name
 
 
     def __str__(self):
