@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from collections import defaultdict
+import pdb
 
 # given: List[Pair[Coordinate]], Dimensions
 # output: List[Path] = List[List[Coordinate]]
@@ -24,6 +25,7 @@ class FlowSolver:
         self.pairs = []
         self.size = size
         self.grid = defaultdict(lambda: 0)
+        self.solved_names = []
         pass
 
     def add_pair(self, pair, name):
@@ -31,11 +33,28 @@ class FlowSolver:
         for p in pair:
             self.grid[p] = name
 
+    def point_add(self, p1, p2):
+        return (p1[0] + p2[0], p1[1] + p2[1])
+
     def on_boundary(self, point):
         # for now we just say whether it's truly on the boundary of the grid
         # later we'll add in the boundary including already painted sections
         x,y = point
         return x in (0, self.size-1) or y in (0, self.size-1)
+
+    def on_effective_boundary(self, point):
+        # either on the boundary itself
+        # OR all points leading to boundary are painted
+        for direction in (1,0), (-1,0), (0,1), (0,-1):
+            p = point
+            while True:
+                p = self.point_add(p, direction)
+                if not self.in_grid(p):
+                    # we've escaped, effective boundary in this direction
+                    return True
+                if not self.grid[p]:
+                    # not painted, not boundary in this direction
+                    break
 
     def in_grid(self, point):
         x,y = point
@@ -59,12 +78,12 @@ class FlowSolver:
             prepath = []
 
         if start == end:
-            return []
+            return [start]
         # look for boundary path connecting these points
         for point in self.free_neighbors(start):
             if point in prepath:
                 continue
-            if not self.on_boundary(point):
+            if not self.on_effective_boundary(point):
                 continue
             subpath = self.get_path(point, end, prepath=prepath+[start])
             if subpath is not None:
@@ -74,23 +93,45 @@ class FlowSolver:
         for p in path:
             self.grid[p] = name
 
+    def remove_loops(self, path):
+        # look for spots where the path goes in a square where it could go straight
+        skip = []
+        for i in range(len(path) - 3):
+            p1, p2, p3, p4 = path[i:i+4]
+            if p4 in self.neighbors(p1):
+                skip.append(p2)
+                skip.append(p3)
+        return [p for p in path if p not in skip]
+
+
     def solve(self):
         # look for pairs of points that are on the boundary
-        for (p1, p2), name in self.pairs:
-            if self.on_boundary(p1) and self.on_boundary(p2):
-                print( f"{name} = {p1,p2} on boundary" )
-                print( "Finding path for {name}" )
+        found_path = True
+        while found_path:
+            found_path = False
+            for (p1, p2), name in self.pairs:
+                assert self.grid[p1] == self.grid[p2] == name
 
-                # temporarily unmark p2 so the path algorithm works
-                prev_p2 = self.grid[p2]
-                self.grid[p2] = 0
-                path = self.get_path(p1, p2)
-                self.grid[p2] = prev_p2
-                self.paint(path, name)
+                if name in self.solved_names:
+                    continue
+                if self.on_effective_boundary(p1) and self.on_effective_boundary(p2):
+                    print( f"{name} = {p1,p2} on boundary" )
+                    print( f"Finding path for {name}" )
 
-                print( f"Path is: {path}" )
+                    # temporarily unmark endpoints so the path algorithm works
+                    self.grid[p1] = self.grid[p2] = 0
+                    path = self.get_path(p1, p2)
+                    if path:
+                        path = self.remove_loops(path)
+                        print( f"Path is: {path}" )
+                        found_path = True
+                        self.paint(path, name)
+                        self.solved_names.append(name)
+                    self.grid[p1] = self.grid[p2] = name
 
-    def tostring(self):
+
+    def __str__(self):
+        out = ''
         for y in range(self.size):
             line = ''
             for x in range(self.size):
@@ -98,11 +139,12 @@ class FlowSolver:
                     line += self.grid[x,y][0].upper()
                 else:
                     line += ' '
-            print(line)
+            out += line + '\n'
+        return out
 
 if __name__ == '__main__':
     fs = FlowSolver(GRID_SIZE)
     for (pair, name) in INPUT:
         fs.add_pair(pair, name)
     fs.solve()
-    fs.tostring()
+    print(fs)
