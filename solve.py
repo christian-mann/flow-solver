@@ -411,7 +411,7 @@ if __name__ == '__main__':
     print(fs.is_solved())
     print(fs)
 
-    if fs.is_solved():
+    if True or fs.is_solved():
         gi = GridInputter(grid_size)
         for path in fs.paths.values():
             path = gi.simplify_path(path)
