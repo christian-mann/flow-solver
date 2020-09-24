@@ -419,4 +419,3 @@ if __name__ == '__main__':
             for i in range(len(path)-1):
                 print(f"{path[i]} -> {path[i+1]}")
                 gi.input_swipe( path[i], path[i+1] , time=400)
-            time.sleep(0.5)
