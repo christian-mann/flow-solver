@@ -22,14 +22,45 @@ class GridReader:
     END_X = 1.0
     END_Y = 0.78
 
-    def __init__(self, size):
-        self.grid_size = size
+    GRIDLINE_COLOR = (127, 95, 63)
 
-    def read(self, fname):
+    def __init__(self, fname):
+        self.img = cv2.imread(fname)
+        self.sheight, self.swidth = self.img.shape[:2]
+        self.grid_size = self.determine_grid_size()
+
+    def is_gridline(self, k):
+        if abs(k[0] - self.GRIDLINE_COLOR[0]) > 2: return False
+        if abs(k[1] - self.GRIDLINE_COLOR[1]) > 2: return False
+        if abs(k[2] - self.GRIDLINE_COLOR[2]) > 2: return False
+        return True
+
+    def determine_grid_size(self):
+        num_gridlines = 0
+        in_gridline = False
+        # try and count the vertical lines
+        py = round(self.sheight * self.START_Y + 10)
+        for px in range(self.swidth):
+            k = self.img[py,px]
+            if self.is_gridline(k):
+                if in_gridline:
+                    # already in gridline, we don't care
+                    pass
+                else:
+                    # new gridline
+                    num_gridlines += 1
+                    in_gridline = True
+            else:
+                if in_gridline:
+                    # gridline ended
+                    in_gridline = False
+                else:
+                    # already not in a gridline
+                    pass
+        return num_gridlines - 1
+
+    def read_dots(self):
         # produces List[Pair[Coordinate]]
-
-        img = cv2.imread(fname)
-        self.sheight, self.swidth = img.shape[:2]
 
         # get the color at the center of each gridline
         dx = self.swidth / self.grid_size
@@ -44,7 +75,7 @@ class GridReader:
                 px = round(px)
                 py = round(py)
 
-                k = tuple(img[py,px])
+                k = tuple(self.img[py,px])
                 k = tuple(val if val >= 30 else 0 for val in k)
 
                 if k != (0,0,0):
@@ -120,7 +151,7 @@ class FlowSolver:
 
     def step_boundary_path(self):
         for (start, name) in self.heads:
-            if self.on_effective_boundary(start):
+            if self.on_effective_boundary(start, name):
                 # look for other end
                 end, name2 = [(end,name2) for (end,name2) in self.heads if name == name2 and start != end][0]
                 path = self.get_boundary_path(start, end, name)
@@ -172,14 +203,14 @@ class FlowSolver:
         x,y = point
         return x in (0, self.size-1) or y in (0, self.size-1)
 
-    def on_effective_boundary(self, point):
+    def on_effective_boundary(self, point, name):
         # either on the boundary itself
         # or one of its neighbors is solved
         if self.on_boundary(point): return True
         if any(self.grid[p] in self.solved_names for p in self.neighbors(point)): return True
         if any(self.grid[p] in self.solved_names for p in self.diagonals(point)): return True
 
-        # OR all points leading to boundary are painted
+        # OR all points leading to boundary are painted with a DIFFERENT name
         for direction in (1,0), (-1,0), (0,1), (0,-1):
             p = point
             while True:
@@ -189,6 +220,9 @@ class FlowSolver:
                     return True
                 if not self.grid[p]:
                     # not painted, not boundary in this direction
+                    break
+                if self.grid[p] == name:
+                    # painted the same color, this is considered unpainted, so not boundary
                     break
 
     def get_boundary_path(self, start, end, name, prepath=None):
@@ -204,7 +238,7 @@ class FlowSolver:
                 continue
             if point in prepath:
                 continue
-            if not self.on_effective_boundary(point):
+            if not self.on_effective_boundary(point, name):
                 continue
             subpath = self.get_boundary_path(point, end, name, prepath=prepath+[start])
             if subpath is not None:
@@ -236,17 +270,6 @@ class FlowSolver:
 
     def free_neighbors(self, point):
         return [p for p in self.neighbors(point) if not self.grid[p]]
-
-    def remove_loops(self, path):
-        # look for spots where the path goes in a square where it could go straight
-        skip = []
-        for i in range(len(path) - 3):
-            p1, p2, p3, p4 = path[i:i+4]
-            if p4 in self.neighbors(p1):
-                skip.append(p2)
-                skip.append(p3)
-        return [p for p in path if p not in skip]
-
 
     def __str__(self):
         out = ''
@@ -323,12 +346,12 @@ class GridInputter:
 
 
 if __name__ == '__main__':
-    GRID_SIZE = 7
+    gr = GridReader('screen.png')
+    grid_size = gr.grid_size
 
-    gr = GridReader(GRID_SIZE)
-    pairs = gr.read('screen.png')
+    pairs = gr.read_dots()
 
-    fs = FlowSolver(GRID_SIZE)
+    fs = FlowSolver(grid_size)
     for pair, name in zip(pairs, string.ascii_lowercase):
         fs.add_pair(pair, name)
     print(fs)
@@ -344,7 +367,7 @@ if __name__ == '__main__':
     print(fs)
 
     if fs.is_solved():
-        gi = GridInputter(GRID_SIZE)
+        gi = GridInputter(grid_size)
         for path in fs.paths.values():
             path = gi.simplify_path(path)
             print(fs.grid[path[0]])
