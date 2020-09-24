@@ -22,27 +22,29 @@ class GridReader:
     END_X = 1.0
     END_Y = 0.78
 
-    GRIDLINE_COLOR = (127, 95, 63)
-
     def __init__(self, fname):
         self.img = cv2.imread(fname)
         self.sheight, self.swidth = self.img.shape[:2]
         self.grid_size = self.determine_grid_size()
 
-    def is_gridline(self, k):
-        if abs(k[0] - self.GRIDLINE_COLOR[0]) > 2: return False
-        if abs(k[1] - self.GRIDLINE_COLOR[1]) > 2: return False
-        if abs(k[2] - self.GRIDLINE_COLOR[2]) > 2: return False
+    def is_same_color(self, k, k2):
+        if abs(k[0] - k2[0]) > 2: return False
+        if abs(k[1] - k2[1]) > 2: return False
+        if abs(k[2] - k2[2]) > 2: return False
         return True
 
     def determine_grid_size(self):
+        gridline_color = self.img[
+            round(self.sheight * self.START_Y + 5),
+            100]
+
         num_gridlines = 0
         in_gridline = False
         # try and count the vertical lines
         py = round(self.sheight * self.START_Y + 10)
         for px in range(self.swidth):
             k = self.img[py,px]
-            if self.is_gridline(k):
+            if self.is_same_color(k, gridline_color):
                 if in_gridline:
                     # already in gridline, we don't care
                     pass
