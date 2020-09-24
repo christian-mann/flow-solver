@@ -129,8 +129,8 @@ class FlowSolver:
                     del self.paths[nei]
                     # mark color as solved
                     self.solved_names.append(name)
-                    return True
-        return False
+                    return name
+        return None
 
     def step_only_one_option(self):
         for head in self.heads:
@@ -148,16 +148,19 @@ class FlowSolver:
                 self.paths[free_nei[0]] = self.paths[point] + [free_nei[0]]
                 del self.paths[point]
                 
-                return True
-        return False
+                return name
+        return None
 
     def step_boundary_path(self):
         for (start, name) in self.heads:
             if self.on_effective_boundary(start, name):
                 # look for other end
                 end, name2 = [(end,name2) for (end,name2) in self.heads if name == name2 and start != end][0]
-                path = self.get_boundary_path(start, end, name)
-                if path:
+                paths = list(self.get_boundary_paths(start, end, name))
+                if paths:
+                    # pick the shortest one
+                    path = min(paths, key=len)
+
                     # paint grid
                     for p in path:
                         self.grid[p] = name
@@ -169,7 +172,8 @@ class FlowSolver:
                     del self.paths[end]
                     # mark name as solved
                     self.solved_names.append(name)
-                    return True
+                    return name
+        return None
 
 
 
@@ -177,22 +181,24 @@ class FlowSolver:
         # look for a head with only one open neighbor
         found = True
         while found:
-            print(self)
             found = False
 
             # look for two heads next to each other
-            if self.step_two_adjacent_heads():
+            if name := self.step_two_adjacent_heads():
                 found = True
+                print(f"two adjacent heads for {name}")
                 continue
 
             # look for a head that can only go one direction
-            if self.step_only_one_option():
+            if name := self.step_only_one_option():
                 found = True
+                print(f"only one option for {name}")
                 continue
 
             # look for a head that can travel to its counterpart solely by boundary tiles
-            if self.step_boundary_path():
+            if name := self.step_boundary_path():
                 found = True
+                print(f"found boundary path for {name}")
                 continue
 
 
@@ -227,12 +233,12 @@ class FlowSolver:
                     # painted the same color, this is considered unpainted, so not boundary
                     break
 
-    def get_boundary_path(self, start, end, name, prepath=None):
+    def get_boundary_paths(self, start, end, name, prepath=None):
         if prepath is None:
             prepath = []
 
         if start == end:
-            return [start]
+            yield [start]
         # look for boundary path connecting these points
         for point in self.neighbors(start):
             if self.grid[point] and self.grid[point] != name:
@@ -242,9 +248,8 @@ class FlowSolver:
                 continue
             if not self.on_effective_boundary(point, name):
                 continue
-            subpath = self.get_boundary_path(point, end, name, prepath=prepath+[start])
-            if subpath is not None:
-                return [start] + subpath
+            for subpath in self.get_boundary_paths(point, end, name, prepath=prepath+[start]):
+                yield [start] + subpath
 
     def in_grid(self, point):
         x,y = point
