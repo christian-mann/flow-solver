@@ -328,6 +328,11 @@ class GridInputter:
                 new_path.append(path[i+0])
                 i += 1
         new_path += path[i:]
+
+        # lastly, the game wants to help us complete paths so if the last two are neighbors we remove the last one
+        if len(new_path) >= 3:
+            if abs(new_path[-1][0] - new_path[-2][0]) + abs(new_path[-1][1] - new_path[-2][1]) == 1:
+                new_path = new_path[:-1]
         return new_path
 
 
