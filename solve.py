@@ -81,43 +81,87 @@ class FlowSolver:
     def is_head(self, point):
         return any(p == point for (p,n) in self.heads)
 
+    def step_two_adjacent_heads(self):
+        for head in self.heads:
+            point, name = head
+            neighbors = self.neighbors(point)
+
+            for nei in neighbors:
+                if self.is_head(nei) and self.grid[nei] == name:
+                    # dots connected - remove heads
+                    self.heads.remove( (point, name) )
+                    self.heads.remove( (nei, name) )
+                    # canonicalize paths
+                    self.paths[point] += self.paths[nei][::-1]
+                    del self.paths[nei]
+                    # mark color as solved
+                    self.solved_names.append(name)
+                    return True
+        return False
+
+    def step_only_one_option(self):
+        for head in self.heads:
+            point, name = head
+            # look for somewhere to expand
+            free_nei = self.free_neighbors(point)
+            if len(free_nei) == 1:
+                # paint grid
+                self.grid[free_nei[0]] = name
+                # update head
+                self.heads.remove(head)
+                head = (free_nei[0], name)
+                self.heads.append(head)
+                # update path
+                self.paths[free_nei[0]] = self.paths[point] + [free_nei[0]]
+                del self.paths[point]
+                
+                return True
+        return False
+
+    def step_boundary_path(self):
+        for (start, name) in self.heads:
+            if self.on_effective_boundary(start):
+                # look for other end
+                end, name2 = [(end,name2) for (end,name2) in self.heads if name == name2 and start != end][0]
+                path = self.get_boundary_path(start, end, name)
+                if path:
+                    # paint grid
+                    for p in path:
+                        self.grid[p] = name
+                    # remove heads
+                    self.heads.remove( (start, name) )
+                    self.heads.remove( (end, name2) )
+                    # combine paths
+                    self.paths[start] = self.paths[start] + path + self.paths[end][::-1]
+                    del self.paths[end]
+                    # mark name as solved
+                    self.solved_names.append(name)
+                    return True
+
+
+
     def solve(self):
         # look for a head with only one open neighbor
         found = True
         while found:
+            print(self)
             found = False
-            for head in self.heads:
-                point, name = head
-                neighbors = self.neighbors(point)
 
-                # first look for neighboring head
-                for nei in neighbors:
-                    if self.is_head(nei) and self.grid[nei] == name:
-                        # dots connected - remove heads
-                        self.heads.remove( (point, name) )
-                        self.heads.remove( (nei, name) )
-                        # canonicalize paths
-                        self.paths[point] += self.paths[nei][::-1]
-                        del self.paths[nei]
-                        found = True
+            # look for two heads next to each other
+            if self.step_two_adjacent_heads():
+                found = True
+                continue
 
-                if not found:
-                    # look for somewhere to expand
-                    free_nei = self.free_neighbors(point)
-                    if len(free_nei) == 1:
-                        # paint grid
-                        self.grid[free_nei[0]] = name
+            # look for a head that can only go one direction
+            if self.step_only_one_option():
+                found = True
+                continue
 
-                        # update head
-                        self.heads.remove(head)
-                        head = (free_nei[0], name)
-                        self.heads.append(head)
+            # look for a head that can travel to its counterpart solely by boundary tiles
+            if self.step_boundary_path():
+                found = True
+                continue
 
-                        # update path
-                        self.paths[free_nei[0]] = self.paths[point] + [free_nei[0]]
-                        del self.paths[point]
-
-                        found = True
 
     def is_solved(self):
         return not self.heads and all(self.grid.values())
@@ -147,6 +191,25 @@ class FlowSolver:
                     # not painted, not boundary in this direction
                     break
 
+    def get_boundary_path(self, start, end, name, prepath=None):
+        if prepath is None:
+            prepath = []
+
+        if start == end:
+            return [start]
+        # look for boundary path connecting these points
+        for point in self.neighbors(start):
+            if self.grid[point] and self.grid[point] != name:
+                # already painted by another color
+                continue
+            if point in prepath:
+                continue
+            if not self.on_effective_boundary(point):
+                continue
+            subpath = self.get_boundary_path(point, end, name, prepath=prepath+[start])
+            if subpath is not None:
+                return [start] + subpath
+
     def in_grid(self, point):
         x,y = point
         return 0 <= x < self.size and 0 <= y < self.size
@@ -158,6 +221,16 @@ class FlowSolver:
             (x+1,y),
             (x,y-1),
             (x,y+1)
+        ]
+        return [p for p in potentials if self.in_grid(p)]
+
+    def diagonals(self, point):
+        x,y = point
+        potentials = [
+            (x-1,y-1),
+            (x-1,y+1),
+            (x+1,y-1),
+            (x+1,y+1),
         ]
         return [p for p in potentials if self.in_grid(p)]
 
@@ -260,7 +333,13 @@ if __name__ == '__main__':
         fs.add_pair(pair, name)
     print(fs)
     print()
-    fs.solve()
+    try:
+        fs.solve()
+    except:
+        print(fs)
+        print('heads', fs.heads)
+        print('paths', fs.paths)
+        raise
     print(fs.is_solved())
     print(fs)
 
