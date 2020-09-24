@@ -3,67 +3,60 @@ from collections import defaultdict
 from copy import deepcopy
 import re
 import time
+import string
+
+import cv2
+import numpy as np
 
 from adb_shell.adb_device import AdbDeviceTcp
 
 import pdb
+from collections import Counter
+import sys
 
 # could do SAT solver... but let's try to make our own algorithm
 
-# (x,y) where 0,0 is top-left
-# level 1 from Classic Pack
-INPUT = [
-    ( ( (0,0), (1,4) ), "red" ),
-    ( ( (2,0), (1,3) ), "green" ),
-    ( ( (2,1), (2,4) ), "blue" ),
-    ( ( (4,0), (3,3) ), "yellow" ),
-    ( ( (4,1), (3,4) ), "orange" ),
-]
-GRID_SIZE = 5
+class GridReader:
+    START_X = 0.0
+    START_Y = 0.22
+    END_X = 1.0
+    END_Y = 0.78
 
-# level 1 from Bonus Pack
-INPUT = [
-    ( ( (1,3), (4,1) ), "yellow"),
-    ( ( (0,3), (4,3) ), "green"),
-    ( ( (1,1), (3,1) ), "blue"),
-    ( ( (3,3), (4,4) ), "red"),
-]
-GRID_SIZE = 5
+    def __init__(self, size):
+        self.grid_size = size
 
-# level 2 from Bonus Pack 5x5 tier
-INPUT = [
-    ( ( (0,1), (4,4) ), "green"),
-    ( ( (0,2), (3,2) ), "yellow"),
-    ( ( (3,1), (1,2) ), "red"),
-    ( ( (2,2), (1,3) ), "blue"),
-]
-GRID_SIZE = 5
+    def read(self, fname):
+        # produces List[Pair[Coordinate]]
 
-# level 1 from Bonus Pack 9x9 tier
-INPUT = [
-    ( ( (0,0), (8,4) ), "green"),
-    ( ( (0,1), (1,8) ), "red"),
-    ( ( (2,1), (7,6) ), "maroon"),
-    ( ( (0,2), (3,3) ), "yellow"),
-    ( ( (5,2), (5,5) ), "blue"),
-    ( ( (1,5), (8,6) ), "orange"),
-    ( ( (2,5), (4,7) ), "sky blue"),
-    ( ( (3,5), (7,7) ), "purple"),
-    ( ( (7,1), (8,5) ), "vink"),
-]
-GRID_SIZE = 9
+        img = cv2.imread(fname)
+        self.sheight, self.swidth = img.shape[:2]
 
-# level 2 from Bonus Pack 9x9 tier
-INPUT = [
-    ( ( (1,0), (1,6) ), "vink"),
-    ( ( (2,0), (5,5) ), "yellow"),
-    ( ( (3,0), (3,3) ), "green"),
-    ( ( (3,1), (2,3) ), "orange"),
-    ( ( (5,0), (4,4) ), "blue"),
-    ( ( (6,0), (0,7) ), "red"),
-    ( ( (1,5), (6,1) ), "sky"),
-    ( ( (7,1), (1,7) ), "maroon"),
-]
+        # get the color at the center of each gridline
+        dx = self.swidth / self.grid_size
+        dy = self.sheight * (self.END_Y - self.START_Y) / self.grid_size
+
+        dots = defaultdict(list)
+        for y in range(self.grid_size):
+            for x in range(self.grid_size):
+                px = x * dx + dx/2
+                py = y * dy + dy/2 + self.START_Y * self.sheight
+
+                px = round(px)
+                py = round(py)
+
+                k = tuple(img[py,px])
+                k = tuple(val if val >= 30 else 0 for val in k)
+
+                if k != (0,0,0):
+                    # dot
+                    dots[k].append((x,y))
+
+        # examine the dots array and make sure it makes sense
+        for color, coords in dots.items():
+            if len(coords) != 2:
+                print(f"Error: more than 2 dots of color {color}: {coords}")
+        return list(dots.values())
+
 
 
 class FlowSolver:
@@ -257,8 +250,13 @@ class GridInputter:
 
 
 if __name__ == '__main__':
+    GRID_SIZE = 7
+
+    gr = GridReader(GRID_SIZE)
+    pairs = gr.read('screen.png')
+
     fs = FlowSolver(GRID_SIZE)
-    for (pair, name) in INPUT:
+    for pair, name in zip(pairs, string.ascii_lowercase):
         fs.add_pair(pair, name)
     print(fs)
     print()
@@ -266,11 +264,12 @@ if __name__ == '__main__':
     print(fs.is_solved())
     print(fs)
 
-    gi = GridInputter(GRID_SIZE)
-    for path in fs.paths.values():
-        path = gi.simplify_path(path)
-        print(fs.grid[path[0]])
-        for i in range(len(path)-1):
-            #print(f"{path[i]} -> {path[i+1]}")
-            gi.input_swipe( path[i], path[i+1] , time=50)
-        time.sleep(0.5)
+    if fs.is_solved():
+        gi = GridInputter(GRID_SIZE)
+        for path in fs.paths.values():
+            path = gi.simplify_path(path)
+            print(fs.grid[path[0]])
+            for i in range(len(path)-1):
+                #print(f"{path[i]} -> {path[i+1]}")
+                gi.input_swipe( path[i], path[i+1] , time=400)
+            time.sleep(0.5)
