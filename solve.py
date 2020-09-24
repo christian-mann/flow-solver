@@ -175,12 +175,41 @@ class FlowSolver:
                     return name
         return None
 
+    def step_rescue_square(self):
+        # looking for a square that can only be reached by one head
+        for head in self.heads:
+            point, name = head
+            for neigh in self.free_neighbors(point):
+                open_neighbors = 0
+                other_head_adjacent = False
+                for nei2 in self.neighbors(neigh):
+                    if nei2 == point:
+                        # of course we're our neighbor's neighbor
+                        pass
+                    elif not self.grid[nei2]:
+                        open_neighbors += 1
+                    elif self.is_head(nei2):
+                        other_head_adjacent = True
+                if open_neighbors == 1 and not other_head_adjacent:
+                    # this head must go to this point, nothing else will
+                    # paint grid
+                    self.grid[neigh] = name
+                    # update head
+                    self.heads.remove(head)
+                    self.heads.append( (neigh, name) )
+                    # update path
+                    self.paths[neigh] = self.paths[point] + [neigh]
+                    del self.paths[point]
+
+                    return name
+        return None
 
 
     def solve(self):
         # look for a head with only one open neighbor
         found = True
         while found:
+            print(self)
             found = False
 
             # look for two heads next to each other
@@ -199,6 +228,11 @@ class FlowSolver:
             if name := self.step_boundary_path():
                 found = True
                 print(f"found boundary path for {name}")
+                continue
+            
+            if name := self.step_rescue_square():
+                found = True
+                print(f"found square that could only be reached by {name}")
                 continue
 
 
@@ -353,7 +387,6 @@ class GridInputter:
         px = x * dx + dx/2
         py = y * dy + dy/2 + self.START_Y * self.sheight
 
-        print(f'{x,y} becomes {px,py}')
         return round(px), round(py)
 
 
@@ -384,6 +417,6 @@ if __name__ == '__main__':
             path = gi.simplify_path(path)
             print(fs.grid[path[0]])
             for i in range(len(path)-1):
-                #print(f"{path[i]} -> {path[i+1]}")
+                print(f"{path[i]} -> {path[i+1]}")
                 gi.input_swipe( path[i], path[i+1] , time=400)
             time.sleep(0.5)
