@@ -1,6 +1,12 @@
 import cv2
 import numpy as np
+import pycosat
+from collections import defaultdict
 import sys
+import itertools as it
+import time
+from adb_shell.adb_device import AdbDeviceTcp
+import re
 
 class TentReader:
     def __init__(self, fname):
@@ -22,7 +28,7 @@ class TentReader:
         self.totals_cols = []
         self.guess_numbers()
 
-        self.grid = {}
+        self.trees = []
         self.read_grid()
 
     def count_dark_pixels_in(self, region):
@@ -70,12 +76,29 @@ class TentReader:
                 k = self.img[py,px]
                 print(x, y, self.img[py,px])
                 if np.all(k == BLANK):
-                    self.grid[x,y] = '.'
+                    pass
                 elif np.all(k == TREE):
-                    self.grid[x,y] = 'T'
+                    self.trees.append((x,y))
                 else:
                     raise ValueError()
         pass
+
+    def __str__(self):
+        s = ''
+        for x in range(self.grid_size):
+            s += str(self.totals_cols[x])
+        s += '\n'
+        s += '\n'
+        for y in range(self.grid_size):
+            for x in range(self.grid_size):
+                if (x,y) in self.trees:
+                    s += 'T'
+                else:
+                    s += '.'
+            s += ' '
+            s += str(self.totals_rows[y])
+            s += '\n'
+        return s
 
     def mark_number_locations(self):
         assert self.numlocs_rows and self.numlocs_cols
@@ -160,15 +183,276 @@ class TentReader:
         return len(self.gridlines_x) - 1
 
 
+UP = 0
+RIGHT = 1
+DOWN = 2
+LEFT = 3
+DIRECTIONS = (UP,DOWN,LEFT,RIGHT)
 class TreeSolver:
-    def __init__(self):
-        pass
+    def __init__(self, grid_size):
+        self.grid_size = grid_size
+        self.col_tots = [0] * grid_size
+        self.row_tots = [0] * grid_size
+        self.tree_locs = []
+
+        # these are filled in with the solution
+        self.tent_locs = []
+        self.tree_dirs = {}
+
+    def add_tree(self, x, y):
+        self.tree_locs.append((x,y))
+
+    def set_col_tot(self, x, tot):
+        self.col_tots[x] = tot
+
+    def set_row_tot(self, y, tot):
+        self.row_tots[y] = tot
+
+    def sat_encode_cell(self, x, y):
+        val = 1 + y * self.grid_size + x
+        assert val > 0
+        return val
+
+    def sat_encode_tree_dir(self, x, y, direc):
+        # direc is one of [0,1,2,3]
+        val = 1 + self.grid_size**2 + self.sat_encode_cell(x,y)*4 + direc
+        assert val > 0
+        return val
+
+    def valid_space(self, x, y):
+        return 0 <= x < self.grid_size and 0 <= y < self.grid_size
+
+    def ortho_neighbors(self, x, y):
+        candidates = [
+            (x+1,y),
+            (x-1,y),
+            (x,y+1),
+            (x,y-1)
+        ]
+        return [(x,y) for (x,y) in candidates if self.valid_space(x,y)]
+
+    def all_neighbors(self, x, y):
+        candidates = [
+            (x-1,y-1),
+            (x-1,y),
+            (x-1,y+1),
+
+            (x,y-1),
+            (x,y+1),
+
+            (x+1,y-1),
+            (x+1,y),
+            (x+1,y+1)
+        ]
+        return [(x,y) for (x,y) in candidates if self.valid_space(x,y)]
+
+    def translate(self, x, y, direc):
+        if direc == UP:
+            return (x, y-1)
+        elif direc == DOWN:
+            return (x, y+1)
+        elif direc == LEFT:
+            return (x-1, y)
+        elif direc == RIGHT:
+            return (x+1, y)
+
+    def invert(self, direc):
+        if direc == UP:
+            return DOWN
+        elif direc == DOWN:
+            return UP
+        elif direc == LEFT:
+            return RIGHT
+        elif direc == RIGHT:
+            return LEFT
+
+    def k_out_of_n_sat(self, vs, k):
+        vs = list(vs)
+        n = len(vs)
+        # no more than k are true
+        for combo in it.combinations(vs, k+1):
+            # at least one of these is false
+            yield [-c for c in combo]
+        # at least k are true
+        for combo in it.combinations(vs, n-k+1):
+            # at least one of these is true
+            yield [c for c in combo]
+
+    def solve(self):
+        constraints = []
+        for (tx,ty) in self.tree_locs:
+            # each tree points to a tent, so one of these cells has a tree
+            adj_space_vars = [self.sat_encode_cell(nx,ny) for (nx,ny) in self.ortho_neighbors(tx,ty)]
+            constraints.append(adj_space_vars)
+
+            # each tree is pointing some direction
+            constraints.append( [self.sat_encode_tree_dir(tx,ty,direc) for direc in DIRECTIONS] )
+            # each tree is not pointing in two directions
+            for d1,d2 in it.combinations(DIRECTIONS, 2):
+                constraints.append( [-self.sat_encode_tree_dir(tx,ty,d1), -self.sat_encode_tree_dir(tx,ty,d2)] )
+
+            # if a tree is pointing in a direction there's a tent there
+            for d in DIRECTIONS:
+                nx,ny = self.translate(tx,ty,d)
+                if self.valid_space(nx,ny):
+                    constraints.append( [-self.sat_encode_tree_dir(tx,ty,d), self.sat_encode_cell(nx,ny)] )
+
+            # trees cannot be pointing outside the board
+            if tx == 0:
+                constraints.append([-self.sat_encode_tree_dir(tx,ty,LEFT)])
+            if tx == self.grid_size-1:
+                constraints.append([-self.sat_encode_tree_dir(tx,ty,RIGHT)])
+            if ty == 0:
+                constraints.append([-self.sat_encode_tree_dir(tx,ty,UP)])
+            if ty == self.grid_size-1:
+                constraints.append([-self.sat_encode_tree_dir(tx,ty,DOWN)])
+
+            # no two trees can be pointing at the same square
+            for d1 in DIRECTIONS:
+                nx,ny = self.translate(tx,ty,d1)
+                for d2 in DIRECTIONS:
+                    nnx,nny = self.translate(nx,ny,d2)
+                    if (nnx,nny) == (tx,ty): continue
+                    if (nnx,nny) in self.tree_locs:
+                        constraints.append([
+                            -self.sat_encode_tree_dir(tx,ty,d1),
+                            -self.sat_encode_tree_dir(nnx,nny,self.invert(d2))
+                        ])
+                        print(f'Added constraint {constraints[-1]} to prevent trees {tx,ty} and {nnx,nny} from sharing square {nx,ny}')
+
+            # there is not a tent on a tree
+            constraints.append([-self.sat_encode_cell(tx,ty)])
+        
+        # no two tents are adjacent
+        for x in range(self.grid_size):
+            for y in range(self.grid_size):
+                for (nx,ny) in self.all_neighbors(x,y):
+                    # these cannot both be tents
+                    constraints.append([-self.sat_encode_cell(x,y), -self.sat_encode_cell(nx,ny)])
+
+        # the "tree" is not pointing in any direction if there is no tree on a square
+        for x in range(self.grid_size):
+            for y in range(self.grid_size):
+                if (x,y) not in self.tree_locs:
+                    for d in DIRECTIONS:
+                        constraints.append([-self.sat_encode_tree_dir(x,y,d)])
+
+        # number of tents in each col must add up
+        for x in range(self.grid_size):
+            tot = self.col_tots[x]
+            sat_vars = [self.sat_encode_cell(x,y) for y in range(self.grid_size)]
+            constraints.extend( self.k_out_of_n_sat(sat_vars, tot) )
+
+        # number of tents in each row must add up
+        for y in range(self.grid_size):
+            tot = self.row_tots[y]
+            sat_vars = [self.sat_encode_cell(x,y) for x in range(self.grid_size)]
+            constraints.extend( self.k_out_of_n_sat(sat_vars, tot) )
+
+        print(f'encoded using {len(constraints)} clauses')
+
+        soln = pycosat.solve(constraints)
+
+        print(f'solution obtained: {soln}')
+
+        bits = [0]*(max(abs(s) for s in soln)+1)
+        for s in soln:
+            if s > 0:
+                bits[s] = 1
+
+
+        # decode it into tent locations
+        tent_locs = []
+        for y in range(self.grid_size):
+            for x in range(self.grid_size):
+                num = self.sat_encode_cell(x,y)
+                if bits[num]:
+                    tent_locs.append((x,y))
+        self.tent_locs = tent_locs[:]
+        
+        for (x,y) in self.tree_locs:
+            for d in DIRECTIONS:
+                if bits[self.sat_encode_tree_dir(x,y,d)]:
+                    self.tree_dirs[x,y] = d
+        return tent_locs
+    
+    def __str__(self):
+        s = ''
+        for x in range(self.grid_size):
+            s += str(self.col_tots[x])
+        s += '\n'
+        s += '\n'
+        for y in range(self.grid_size):
+            for x in range(self.grid_size):
+                if (x,y) in self.tree_dirs:
+                    d = self.tree_dirs[x,y]
+                    s += {
+                        UP:'^',
+                        DOWN:'v',
+                        LEFT:'<',
+                        RIGHT:'>'
+                    }[d]
+                elif (x,y) in self.tree_dirs:
+                    s += 'T'
+                elif (x,y) in self.tent_locs:
+                    s += '⌂'
+                else:
+                    s += '.'
+            s += ' '
+            s += str(self.row_tots[y])
+            s += '\n'
+        return s
+
+                
+class TentPlanter:
+    def __init__(self, tentreader, host='localhost', port=5555):
+        self.tr = tentreader
+        self.dev = AdbDeviceTcp(host, port, default_transport_timeout_s=9.)
+        self.dev.connect()
+        self.swidth, sheight = self.screen_dimensions()
+        self.grid_size = self.tr.grid_size
+
+    def __del__(self):
+        self.dev.close()
+
+    def screen_dimensions(self):
+        line = self.dev.shell('wm size')
+        result = re.match(r"Physical size: (?P<height>\d+)x(?P<width>\d+)\n", line)
+        return int(result.group('width')), int(result.group('height'))
+
+    def input_tap(self, p):
+        (px,py) = self.get_pixels(p)
+        self.dev.shell(f'input tap {px} {py}')
+
+    def get_pixels(self, p):
+        return self.tr.centers[p]
 
 if __name__ == '__main__':
     gr = TentReader(sys.argv[1])
     grid_size = gr.grid_size
     print('grid_size', grid_size)
 
-    cv2.imshow('img', gr.img)
-    ch = cv2.waitKey()
-    cv2.destroyAllWindows()
+    #cv2.imshow('img', gr.img)
+    #ch = cv2.waitKey()
+    #cv2.destroyAllWindows()
+
+    print(gr)
+
+    ts = TreeSolver(gr.grid_size)
+    for (x,y) in gr.trees:
+        ts.add_tree(x,y)
+
+    for x in range(gr.grid_size):
+        ts.set_col_tot(x, gr.totals_cols[x])
+    for y in range(gr.grid_size):
+        ts.set_row_tot(y, gr.totals_rows[y])
+
+    tree_locs = ts.solve()
+    print(tree_locs)
+    print(ts)
+
+    tp = TentPlanter(gr)
+    for tree in tree_locs:
+        print(f'tapping {tree}')
+        tp.input_tap(tree)
+        #time.sleep(1)
