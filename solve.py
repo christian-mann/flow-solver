@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from adb_shell.adb_device import AdbDeviceTcp
+from adb_shell.auth.sign_pythonrsa import PythonRSASigner
 
 import pdb
 from collections import Counter
@@ -19,13 +20,14 @@ import sys
 
 class GridReader:
     START_X = 0.0
-    START_Y = 0.22
+    START_Y = 391 / 1914
     END_X = 1.0
-    END_Y = 0.78
+    END_Y = 1 - 456 / 1920
 
     def __init__(self, fname):
         self.img = cv2.imread(fname)
         self.sheight, self.swidth = self.img.shape[:2]
+        print(f'{self.sheight=}, {self.swidth=}')
         self.grid_size = self.determine_grid_size()
 
     def is_same_color(self, k, k2):
@@ -34,10 +36,21 @@ class GridReader:
         if abs(k[2] - k2[2]) > 2: return False
         return True
 
+    def determine_gridline_color(self):
+        colors = [
+            self.img[
+                round(self.sheight * self.START_Y) - 10 + i,
+                100
+            ] for i in range(20)
+        ]
+        #print(f'{colors=}')
+        for c in colors:
+            if c.all():
+                return c
+
     def determine_grid_size(self):
-        gridline_color = self.img[
-            round(self.sheight * self.START_Y + 5),
-            100]
+        gridline_color = self.determine_gridline_color()
+        print(f'{gridline_color=}')
 
         num_gridlines = 0
         in_gridline = False
@@ -148,21 +161,29 @@ class FlowSolver:
 
 class GridInputter:
     # fractions of the screen that the grid takes up
-    START_X = 0.0
-    START_Y = 0.22
-    END_X = 1.0
-    END_Y = 0.78
+    START_X = GridReader.START_X
+    END_X = GridReader.END_X
+    START_Y = GridReader.START_Y
+    END_Y = GridReader.END_Y
 
-    GEV_MULTIPLIER = 17.4
-
-    def __init__(self, grid_size, host='localhost', port=5555):
+    def __init__(self, grid_size, host='192.168.1.179', port=5555):
+        with open('adbkey') as f:
+            priv = f.read()
+        with open('adbkey.pub') as f:
+            pub = f.read()
+        signer = PythonRSASigner(pub, priv)
         self.dev = AdbDeviceTcp(host, port, default_transport_timeout_s=9.)
-        self.dev.connect()
-        self.swidth, self.sheight = self.screen_dimensions()
+        self.dev.connect(rsa_keys=[signer])
+        self.swidth, self.sheight = self.screen_dimensions()[::-1]
+        #print(f'{self.swidth=}, {self.sheight=}')
         self.grid_size = grid_size
 
     def __del__(self):
         self.dev.close()
+
+    def shell(self, s):
+        #print(f'shell: {s}')
+        self.dev.shell(s)
 
     def screen_dimensions(self):
         line = self.dev.shell('wm size')
@@ -173,7 +194,7 @@ class GridInputter:
         start_pix = self.get_pixels(p1)
         end_pix = self.get_pixels(p2)
 
-        self.dev.shell(f'input swipe {start_pix[0]} {start_pix[1]} {end_pix[0]} {end_pix[1]} {time}')
+        self.shell(f'input swipe {start_pix[0]} {start_pix[1]} {end_pix[0]} {end_pix[1]} {time}')
 
     def simplify_path(self, path):
         path = path[:]
@@ -207,7 +228,7 @@ class GridInputter:
         px = x * dx + dx/2
         py = y * dy + dy/2 + self.START_Y * self.sheight
 
-        #print(f"{x,y} becomes {px,py}")
+        print(f"{x,y} becomes {px,py}")
         return round(px), round(py)
 
 
