@@ -39,14 +39,23 @@ class GridReader:
     def determine_gridline_color(self):
         colors = [
             self.img[
-                round(self.sheight * self.START_Y) - 10 + i,
-                100
+                self.sheight // 2,
+                i
             ] for i in range(20)
         ]
-        #print(f'{colors=}')
+        # look for 2-3 in a row
+        prev_c = None
+        count = 0
         for c in colors:
-            if c.all():
-                return c
+            if np.array_equal(c, prev_c):
+                count += 1
+            else:
+                if count == 3:
+                    return prev_c
+                else:
+                    prev_c = c
+                    count = 1
+        raise Exception("Could not identify gridline color")
 
     def determine_grid_size(self):
         gridline_color = self.determine_gridline_color()
