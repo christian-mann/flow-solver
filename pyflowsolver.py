@@ -102,9 +102,9 @@ nested 'for' loops.
 
 ######################################################################
 
-def valid_pos(size, i, j):
+def valid_pos(vsize, hsize, i, j):
     '''Check whether a position on a square grid is valid.'''
-    return i >= 0 and i < size and j >= 0 and j < size
+    return i >= 0 and i < vsize and j >= 0 and j < hsize
 
 ######################################################################
 
@@ -115,13 +115,13 @@ def all_neighbors(i, j):
 
 ######################################################################
 
-def valid_neighbors(size, i, j):
+def valid_neighbors(vsize, hsize, i, j):
     '''Return all actual on-grid neighbors of a grid square at row i,
 column j.'''
 
     return ((dir_bit, ni, nj) for (dir_bit, ni, nj)
             in all_neighbors(i, j)
-            if valid_pos(size, ni, nj))
+            if valid_pos(vsize, hsize, ni, nj))
 
 ######################################################################
 def repair_colors(puzzle, colors):
@@ -175,32 +175,25 @@ indices.
     puzzle = file_or_str.splitlines()
 
     # assume size based on length of first line
-    size = len(puzzle[0])
+    vsize = len(puzzle)
+    hsize = len(puzzle[0])
 
-    # make sure enough lines
-    if len(puzzle) < size:
-        print('{}:{} unexpected EOF'.format(filename, len(puzzle)+1))
-        return None, None
-
-    # truncate extraneous lines
-    puzzle = puzzle[:size]
+    # check that the puzzle is a rectangle
+    for row in puzzle:
+        if len(row) != hsize:
+            raise Exception(f'Irregular puzzle row: {row=!r}')
 
     # count colors and build lookup
     colors = dict()
     color_count = []
 
     for i, row in enumerate(puzzle):
-        if len(row) != size:
-            print('{}:{} row size mismatch'.format(filename, i+1))
-            return None, None
         for j, char in enumerate(row):
             if char.isalnum(): # flow endpoint
                 if char in colors:
                     color = colors[char]
                     if color_count[color]:
-                        print('{}:{}:{} too many {} already'.format(
-                            filename, i+1, j, char))
-                        return None, None
+                        raise Exception(f'{filename}:{i+1}:{j} too many {char} already')
                     color_count[color] = 1
                 else:
                     color = len(colors)
@@ -210,16 +203,15 @@ indices.
     # check parity
     for char, color in colors.items():
         if not color_count[color]:
-            print('color {} has start but no end!'.format(char))
-            return None, None
+            raise Exception(f'color {char} has start but no end')
 
     # print info
     if not options.quiet:
-        print('read {}x{} puzzle with {} colors from {}'.format(
-            size, size, len(colors), filename))
+        print(f'read {hsize}x{vsize} puzzle with {len(colors)} colors from {filename}')
         print()
 
-    puzzle, colors = repair_colors(puzzle, colors)
+    if options.repair_colors:
+        puzzle, colors = repair_colors(puzzle, colors)
     return puzzle, colors
 
 ######################################################################
@@ -234,7 +226,8 @@ encodes a single color in a one-hot fashion.
 
     clauses = []
     num_colors = len(colors)
-    size = len(puzzle)
+    vsize = len(puzzle)
+    hsize = len(puzzle[0])
 
     # for each cell
     for i, j, char in explode(puzzle):
@@ -253,7 +246,7 @@ encodes a single color in a one-hot fashion.
 
             # gather neighbors' variables for this color
             neighbor_vars = [color_var(ni, nj, endpoint_color) for
-                             _, ni, nj in valid_neighbors(size, i, j)]
+                             _, ni, nj in valid_neighbors(vsize, hsize, i, j)]
 
             # one neighbor has this color
             clauses.append(neighbor_vars)
@@ -281,7 +274,8 @@ def make_dir_vars(puzzle, start_var):
 
     '''Creates the direction-type SAT variables for each cell.'''
 
-    size = len(puzzle)
+    vsize = len(puzzle)
+    hsize = len(puzzle[0])
     dir_vars = dict()
     num_dir_vars = 0
 
@@ -292,7 +286,7 @@ def make_dir_vars(puzzle, start_var):
 
         # collect bits for neighbors (TOP BOTTOM LEFT RIGHT)
         neighbor_bits = (dir_bit for (dir_bit, ni, nj)
-                         in valid_neighbors(size, i, j))
+                         in valid_neighbors(vsize, hsize, i, j))
 
         # OR them all together
         cell_flags = reduce(operator.or_, neighbor_bits, 0)
@@ -321,7 +315,8 @@ directions imply color matching with neighbors.
 
     dir_clauses = []
     num_colors = len(colors)
-    size = len(puzzle)
+    vsize = len(puzzle)
+    hsize = len(puzzle[0])
 
     # for each cell
     for i, j, char in explode(puzzle):
@@ -358,7 +353,7 @@ directions imply color matching with neighbors.
                         # this direction type implies the colors are equal
                         dir_clauses.append([-dir_var, -color_1, color_2])
                         dir_clauses.append([-dir_var, color_1, -color_2])
-                    elif valid_pos(size, n_i, n_j):
+                    elif valid_pos(vsize, hsize, n_i, n_j):
                         # neighbor is not along this direction type,
                         # so this direction type implies the colors are not equal
                         dir_clauses.append([-dir_var, -color_1, -color_2])
@@ -375,10 +370,11 @@ possibly negated.
 
     '''
 
-    size = len(puzzle)
+    vsize = len(puzzle)
+    hsize = len(puzzle[0])
     num_colors = len(colors)
 
-    num_cells = size**2
+    num_cells = vsize * hsize
     num_color_vars = num_colors * num_cells
 
     def color_var(i, j, color):
@@ -386,7 +382,7 @@ possibly negated.
  column j.
 
         '''
-        return (i*size + j)*num_colors + color + 1
+        return (i*hsize + j)*num_colors + color + 1
 
     start = datetime.now()
 
@@ -481,7 +477,8 @@ boolean flag indicating if a cycle was detected.
 
     '''
 
-    size = len(decoded)
+    vsize = len(decoded)
+    hsize = len(decoded[0])
 
     run = []
     is_cycle = False
@@ -497,7 +494,7 @@ boolean flag indicating if a cycle was detected.
         run.append((cur_i, cur_j))
 
         # loop over valid neighbors
-        for dir_bit, n_i, n_j in valid_neighbors(size, cur_i, cur_j):
+        for dir_bit, n_i, n_j in valid_neighbors(vsize, hsize, cur_i, cur_j):
 
             # do not consider prev pos
             if (n_i, n_j) == (prev_i, prev_j):
@@ -543,9 +540,10 @@ to prevent them.
 
     '''
 
-    size = len(decoded)
+    vsize = len(decoded)
+    hsize = len(decoded[0])
     colors_seen = set()
-    visited = [[0]*size for _ in range(size)]
+    visited = [[0]*hsize for _ in range(vsize)]
 
     # for each cell
     for i, j, (color, dir_type) in explode(decoded):
@@ -564,7 +562,7 @@ to prevent them.
     # see if there are any unvisited cells, if so they have cycles
     extra_clauses = []
 
-    for i, j in itertools.product(list(range(size)), list(range(size))):
+    for i, j in itertools.product(list(range(vsize)), list(range(hsize))):
 
         if not visited[i][j]:
 

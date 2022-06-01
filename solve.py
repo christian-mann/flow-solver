@@ -5,6 +5,7 @@ import re
 import time
 import string
 import pyflowsolver
+import pprint
 
 import cv2
 import numpy as np
@@ -134,7 +135,7 @@ class GridReader:
 
                 if k != (0,0,0):
                     # dot
-                    dots[k].append((x,y))
+                    dots[k].append((y,x))
 
         # examine the dots array and make sure it makes sense
         for color, coords in dots.items():
@@ -147,6 +148,7 @@ class FakeArg:
         self.quiet = False
         self.display_cycles = False
         self.display_color = False
+        self.repair_colors = False
 
 class FlowSolver:
     def __init__(self, gwidth, gheight):
@@ -166,7 +168,7 @@ class FlowSolver:
     def solve(self):
         # convert to pyflowsolver's format
         square = [ ['.'] * self.gwidth for _ in range(self.gheight) ]
-        for ((x,y), name) in self.heads:
+        for ((y,x), name) in self.heads:
             square[y][x] = name[0].upper()
         puzz_input = '\n'.join(''.join(L) for L in square)
         print(puzz_input)
@@ -180,12 +182,15 @@ class FlowSolver:
         sol, decoded, repairs, solve_time = pyflowsolver.solve_sat(
                 options, puzzle, colors, color_var, dir_vars, clauses)
 
+        #print(f'{decoded=}, {repairs=}, {solve_time=}')
+        #pprint.pprint(decoded)
         if not isinstance(sol, list):
             return False
 
-        zeros = self.make2dzeros(self.size)
-        for (point, name) in self.heads:
-            run, is_cycle = pyflowsolver.make_path(decoded, zeros, point[0], point[1])
+        zeros = self.make2dzeros(self.gheight, self.gwidth)
+        #print(f'{self.heads=}')
+        for ((y,x), name) in self.heads:
+            run, is_cycle = pyflowsolver.make_path(decoded, zeros, y, x)
             if len(run) >= 1:
                 #print(run)
                 self.paths.append(run[:])
@@ -193,8 +198,8 @@ class FlowSolver:
     def is_solved(self):
         return bool(self.paths)
 
-    def make2dzeros(self, sz):
-        return [ [0] * sz for _ in range(sz) ]
+    def make2dzeros(self, height, width):
+        return [ [0] * width for _ in range(height) ]
 
 
 class GridInputter:
@@ -202,7 +207,7 @@ class GridInputter:
     START_X = GridReader.START_X
     END_X = GridReader.END_X
 
-    def __init__(self, reader, host='192.168.1.179', port=5555):
+    def __init__(self, gr, *, host='192.168.1.179', port=5555):
         with open('adbkey') as f:
             priv = f.read()
         with open('adbkey.pub') as f:
@@ -210,7 +215,7 @@ class GridInputter:
         signer = PythonRSASigner(pub, priv)
         self.dev = AdbDeviceTcp(host, port, default_transport_timeout_s=9.)
         self.dev.connect(rsa_keys=[signer])
-        self.gr = reader
+        self.gr = gr
         self.swidth, self.sheight = gr.swidth, gr.sheight
         self.gwidth, self.gheight = gr.gwidth, gr.gheight
         self.starty, self.endy = gr.starty, gr.endy
@@ -287,7 +292,7 @@ if __name__ == '__main__':
         raise
 
     if fs.is_solved():
-        gi = GridInputter(gr.gwidth, gr.gheight)
+        gi = GridInputter(gr)
         for path in fs.paths:
             path = gi.simplify_path(path)
             print(fs.grid[path[0]])
