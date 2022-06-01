@@ -262,7 +262,7 @@ class GridInputter:
 
     def get_pixels(self, point):
         # translate grid point to pixel offset
-        x,y = point
+        y,x = point
 
         dx = self.swidth / self.gwidth
         dy = (self.endy - self.starty) / self.gheight
