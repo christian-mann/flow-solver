@@ -72,7 +72,7 @@ class GridReader:
                 self.swidth // 2 - 10 + i
             ] for i in range(200)
         ]
-        pprint.pprint(colors)
+        #pprint.pprint(colors)
         # look for 2-3 in a row
         prev_c = None
         count = 0
