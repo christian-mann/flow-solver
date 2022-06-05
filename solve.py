@@ -34,6 +34,8 @@ class GridReader:
         print(f'{self.gheight=}, {self.gwidth=}')
         self.starty, self.endy = self.determine_ybound()
         print(f'{self.starty=}, {self.endy=}')
+        self.startx, self.endx = self.determine_xbound()
+        print(f'{self.startx=}, {self.endx=}')
 
     def is_same_color(self, k, k2):
         if abs(k[0] - k2[0]) > 2: return False
@@ -67,10 +69,10 @@ class GridReader:
         colors = [
             self.img[
                 self.sheight // 2 + 3,
-                i
-            ] for i in range(20)
+                self.swidth // 2 - 10 + i
+            ] for i in range(200)
         ]
-        print(f'{colors=}')
+        pprint.pprint(colors)
         # look for 2-3 in a row
         prev_c = None
         count = 0
@@ -78,7 +80,7 @@ class GridReader:
             if np.array_equal(c, prev_c):
                 count += 1
             else:
-                if count == 3:
+                if count in (3,4) and np.all(prev_c):
                     return prev_c
                 else:
                     prev_c = c
@@ -108,18 +110,33 @@ class GridReader:
         first = None
         last = None
         for y in range(self.sheight):
-            if self.is_same_color(self.gridline_color, self.img[y, 10]):
+            if self.is_same_color(self.gridline_color, self.img[y, self.swidth // 2 + 10]):
                 if not first:
                     first = y
                 last = y
+        if not first or not last:
+            raise Exception("Could not determine ybound")
+        return (first, last)
+    
+    def determine_xbound(self):
+        # just the first and last instance of gridline_color
+        first = None
+        last = None
+        for x in range(self.swidth):
+            if self.is_same_color(self.gridline_color, self.img[self.sheight // 2 + 5, x]):
+                if not first:
+                    first = x
+                last = x
+        if not first or not last:
+            raise Exception("Could not determine xbound")
         return (first, last)
 
     def read_dots(self):
         # produces List[Pair[Coordinate]]
 
         # get the color at the center of each gridline
-        dx = self.swidth * (self.END_X - self.START_X) / self.gwidth
         dy = (self.endy - self.starty) / self.gheight
+        dx = (self.endx - self.startx) / self.gwidth
 
         dots = defaultdict(list)
         for y in range(self.gheight):
@@ -219,6 +236,7 @@ class GridInputter:
         self.swidth, self.sheight = gr.swidth, gr.sheight
         self.gwidth, self.gheight = gr.gwidth, gr.gheight
         self.starty, self.endy = gr.starty, gr.endy
+        self.startx, self.endx = gr.startx, gr.endx
 
     def __del__(self):
         self.dev.close()
@@ -264,10 +282,10 @@ class GridInputter:
         # translate grid point to pixel offset
         y,x = point
 
-        dx = self.swidth / self.gwidth
         dy = (self.endy - self.starty) / self.gheight
+        dx = (self.endx - self.startx) / self.gwidth
 
-        px = x * dx + dx/2
+        px = x * dx + dx/2 + self.startx
         py = y * dy + dy/2 + self.starty
 
         print(f"{x,y} becomes {px,py}")
