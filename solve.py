@@ -6,6 +6,8 @@ import time
 import string
 import pyflowsolver
 import pprint
+import matplotlib.colors
+import webcolors
 
 import cv2
 import numpy as np
@@ -16,6 +18,16 @@ from adb_shell.auth.sign_pythonrsa import PythonRSASigner
 import pdb
 from collections import Counter
 import sys
+
+def get_colour_name(rgb_triplet):
+    min_colours = {}
+    for name, key in matplotlib.colors.CSS4_COLORS.items():
+        r_c, g_c, b_c = webcolors.hex_to_rgb(key)
+        rd = (r_c - rgb_triplet[2]) ** 2
+        gd = (g_c - rgb_triplet[1]) ** 2
+        bd = (b_c - rgb_triplet[0]) ** 2
+        min_colours[(rd + gd + bd)] = name
+    return min_colours[min(min_colours.keys())]
 
 # could do SAT solver... but let's try to make our own algorithm
 
@@ -29,7 +41,7 @@ class GridReader:
         self.sheight, self.swidth = self.img.shape[:2]
         print(f'{self.sheight=}, {self.swidth=}')
         self.gridline_color = self.determine_gridline_color()
-        print(f'{self.gridline_color=}')
+        print(f'{self.gridline_color=} aka {get_colour_name(self.gridline_color)}')
         self.gwidth, self.gheight = self.determine_grid_size()
         print(f'{self.gheight=}, {self.gwidth=}')
         self.starty, self.endy = self.determine_ybound()
@@ -80,7 +92,7 @@ class GridReader:
             if np.array_equal(c, prev_c):
                 count += 1
             else:
-                if count in (3,4) and np.all(prev_c):
+                if count in (3,4) and np.all(prev_c >= 10):
                     return prev_c
                 else:
                     prev_c = c
@@ -149,7 +161,7 @@ class GridReader:
 
                 k = tuple(self.img[py,px])
                 #print(f'{px=} {py=} {k=}')
-                k = tuple(val if val >= 30 else 0 for val in k)
+                k = tuple(val if val >= 35 else 0 for val in k)
 
                 if k != (0,0,0):
                     # dot
@@ -158,7 +170,7 @@ class GridReader:
         # examine the dots array and make sure it makes sense
         for color, coords in dots.items():
             if len(coords) != 2:
-                raise Exception(f"Error: more than 2 dots of color {color}: {coords}")
+                raise Exception(f"Error: more than 2 dots of color {color} {get_colour_name(color)}: {coords}")
         return list(dots.values())
 
 class FakeArg:
