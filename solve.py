@@ -141,13 +141,14 @@ class GridReader:
         dots = defaultdict(list)
         for y in range(self.gheight):
             for x in range(self.gwidth):
-                px = x * dx + dx/2
+                px = x * dx + dx/2 + self.startx
                 py = y * dy + dy/2 + self.starty
 
                 px = round(px)
                 py = round(py)
 
                 k = tuple(self.img[py,px])
+                #print(f'{px=} {py=} {k=}')
                 k = tuple(val if val >= 30 else 0 for val in k)
 
                 if k != (0,0,0):
