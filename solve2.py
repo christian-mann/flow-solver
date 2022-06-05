@@ -80,6 +80,53 @@ def remove_dot(im, center):
     loDiff = (int(color[0])-1, int(color[1])-1, int(color[2])-1)
     loDiff = tuple(max(l,0) for l in loDiff)
     cv2.floodFill(im, None, center, (0,0,0), loDiff=loDiff, upDiff=(255,255,255), flags = 8 | cv2.FLOODFILL_FIXED_RANGE)
+
+
+square_size = 0
+wall_color = None
+
+def find_neighbors(im, center):
+    global square_size, wall_color
+    red = (0,0,254)
+    if (im[center[::-1]] == red).all():
+        # we've been here before
+        return
+
+    yield center
+
+    # it is assumed that barriers are non-AA'd
+    cv2.floodFill(im, None, center, red)
+    myshow(im)
+    
+    # start moving in each cardinal direction
+    for direc in ( (0,1), (1,0), (0,-1), (-1,0) ):
+        cur = center
+        amt_traveled = 0
+        try:
+            while (im[cur[::-1]] == red).all() and (
+            square_size == 0 or amt_traveled < square_size + 4):
+                cur = (cur[0] + direc[0], cur[1] + direc[1])
+                amt_traveled += 1
+            if (im[cur[::-1]] == red).all():
+                # didn't find shit
+                continue
+            if square_size == 0:
+                square_size = amt_traveled * 2
+            # we found a wall! maybe
+            if wall_color is None:
+                wall_color = im[cur[::-1]]
+                print(f'{wall_color=} {get_colour_name(wall_color)}')
+            if not (im[cur[::-1]] == wall_color).all():
+                # not a real wall
+                continue
+            wall_width = 0
+            while (im[cur[::-1]] == wall_color).all():
+                cur = (cur[0] + direc[0], cur[1] + direc[1])
+                wall_width += 1
+            print(f'probing {cur=}')
+            yield from find_neighbors(im, cur)
+        except IndexError:
+            continue
     
 
 def thresh_to_black(im):
@@ -95,11 +142,16 @@ def thresh_to_black(im):
 def main(sfImage):
     im = cv2.imread(sfImage)
     im = thresh_to_black(im)
-    centers = find_dot_centers(im)
+    centers = list(find_dot_centers(im))
     for center in centers:
         remove_dot(im, center)
-        myshow(im)
+        #myshow(im)
     cv2.imwrite('scratch/nodots.png', im)
+    for center in centers:
+        for neigh in find_neighbors(im, center):
+            print(f'{neigh=}')
+
+
 
 
 
