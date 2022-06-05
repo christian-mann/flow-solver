@@ -43,6 +43,7 @@ def find_dot_centers(im):
             or areas[1] <= areas[2] < areas[1] * 1.1:
                 dot_size = (areas[1] + areas[2]) / 2
                 print(f'{dot_size=}')
+                #myshow(mask)
                 break
 
     if not dot_size:
@@ -51,7 +52,7 @@ def find_dot_centers(im):
     dot_min = dot_size * 0.9
     dot_max = dot_size * 1.1
 
-    for c in colors:
+    for c in colors[1:]:
         name = get_colour_name(c)
         mask = mask_of_color(im, c)
         # open it up to avoid strangeness particularly around white
@@ -60,7 +61,7 @@ def find_dot_centers(im):
         numLabels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, True, cv2.CV_32S)
         areas = [stats[i, cv2.CC_STAT_AREA] for i in range(numLabels)]
         print(f'{areas=}')
-        if numLabels > 1 and max(areas[1:]) < dot_min:
+        if numLabels > 1 and sum(areas[1:]) < dot_min:
             break
         for i in range(1, numLabels):
             area = areas[i]
@@ -88,6 +89,8 @@ wall_color = None
 def find_neighbors(im, center):
     global square_size, wall_color
     red = (0,0,254)
+    if center[0] < 0 or center[1] < 0:
+        return
     if (im[center[::-1]] == red).all():
         # we've been here before
         return
@@ -96,7 +99,7 @@ def find_neighbors(im, center):
 
     # it is assumed that barriers are non-AA'd
     cv2.floodFill(im, None, center, red)
-    myshow(im)
+    #myshow(im)
     
     # start moving in each cardinal direction
     for direc in ( (0,1), (1,0), (0,-1), (-1,0) ):
@@ -123,9 +126,12 @@ def find_neighbors(im, center):
             while (im[cur[::-1]] == wall_color).all():
                 cur = (cur[0] + direc[0], cur[1] + direc[1])
                 wall_width += 1
-            print(f'probing {cur=}')
+            # move over a bit to ensure that we aren't right on the edge
+            cur = (cur[0] + direc[0] * 10, cur[1] + direc[1] * 10)
             yield from find_neighbors(im, cur)
         except IndexError:
+            continue
+        except cv2.error:
             continue
     
 
@@ -139,6 +145,34 @@ def thresh_to_black(im):
     myshow(out, 'after thresh')
     return out
 
+def get_cells(im, centers, color=(0,0,254)):
+    # just connected components
+    mask = mask_of_color(im, color)
+    numLabels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, True, cv2.CV_32S)
+    areas = [stats[i, cv2.CC_STAT_AREA] for i in range(numLabels)]
+    # need to figure out what the most common area is... but it won't be exact
+    sareas = sorted(areas)
+    sareas = [a for a in sareas if a >= 100]
+    print(f'{sareas=}')
+    incs = [sareas[i+1] / sareas[i] for i in range(len(sareas)-1)]
+    print(f'{incs=}')
+    for start in range(len(incs)):
+        if all(incs[start+i] < 1.05 for i in range(10)):
+            # works for me
+            break
+    else:
+        raise Exception("Couldn't find cells")
+    end = start
+    while incs[end] < 1.05:
+        end += 1
+    print(f'{start=}, {end=}')
+    # okay so [start,end) is the region we care about
+    indices = [i for i in range(len(areas)) if areas[i] in sareas[start:end]]
+    
+    for i in indices:
+        yield (int(centroids[i][0]), int(centroids[i][1]))
+
+
 def main(sfImage):
     im = cv2.imread(sfImage)
     im = thresh_to_black(im)
@@ -150,6 +184,11 @@ def main(sfImage):
     for center in centers:
         for neigh in find_neighbors(im, center):
             print(f'{neigh=}')
+    myshow(im)
+    for cell in get_cells(im, centers):
+        print(f'{cell=}')
+        cv2.floodFill(im, None, cell, (0,255,0))
+    myshow(im)
 
 
 
